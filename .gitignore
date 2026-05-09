@@ -1,0 +1,31 @@
+# Node / Frontend
+node_modules/
+.next/
+dist/
+out/
+build/
+.env*.local
+.npm/
+
+# Python / Backend
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+.env
+
+# C++ Engine
+*.exe
+*.obj
+*.o
+*.out
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
