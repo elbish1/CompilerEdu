@@ -1,9 +1,8 @@
-import React from 'react';
-import { BookOpen, TerminalSquare, Network, Cpu, FileCode2, Layers, SearchCheck, Zap, Scissors } from 'lucide-react';
-import Link from 'next/link';
-import { Button } from '@/components/ui/button';
+import React from "react";
+import type { LucideIcon } from "lucide-react";
+import { BookOpen, Network, Cpu, FileCode2, Layers, SearchCheck, Zap, Scissors } from "lucide-react";
 
-export const theoryData: Record<string, { title: string, icon: any, content: React.ReactNode }> = {
+export const theoryData: Record<string, { title: string; icon: LucideIcon; content: React.ReactNode }> = {
   "introduction": {
     title: "Introduction to Compilers",
     icon: BookOpen,
@@ -215,7 +214,7 @@ export const theoryData: Record<string, { title: string, icon: any, content: Rea
             <p className="text-sm mt-1 mb-2">The compiler deletes code that will never be executed.</p>
             <div className="bg-muted p-3 rounded-md font-mono text-xs border">
               <span className="text-red-400 block">Before: <br/>if (false) &#123; print("Hello"); &#125;</span>
-              <span className="text-green-500 block">After:  <br/>// completely removed</span>
+              <span className="text-green-500 block">After:  <br/>{"// completely removed"}</span>
             </div>
           </div>
           

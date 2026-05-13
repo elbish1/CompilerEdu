@@ -75,7 +75,7 @@ Token Lexer::LexIdentifierOrKeyword() {
 
   // Record identifier in symbol table (as "seen"; declaration happens in semantic/parse stages)
   if (!symbols_.count(s)) {
-    symbols_.insert({s, SymbolInfo{s, "int", false}});
+    symbols_.insert({s, SymbolInfo{s, "int", false, false}});
   }
   return MakeToken(TokenType::Identifier, s, start);
 }

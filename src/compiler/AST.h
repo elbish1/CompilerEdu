@@ -28,7 +28,7 @@ inline const char* ToString(NodeKind k) {
 }
 
 struct TypeInfo {
-  std::string name = "int";   // this project uses only "int"
+  std::string name;  // empty until semantic analysis assigns a type (e.g. "int")
   bool isValid = true;
 };
 
@@ -40,6 +40,9 @@ struct ASTNode {
   TypeInfo type{};
   bool isConst = false;
   edu::Optional<int64_t> constValue;
+  int scopeDepth = 0;  // 0 = translation unit / global in this toy language
+  // Identifier reads: symbol is declared and known to hold a value at this use site
+  bool symbolKnownInitialized = false;
 
   std::vector<std::unique_ptr<ASTNode>> children;
 };

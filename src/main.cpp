@@ -53,10 +53,11 @@ static void PrintSymbolTable(const std::unordered_map<std::string, compiler::Sym
   std::sort(names.begin(), names.end());
 
   std::cout << "Symbol Table:\n";
-  std::cout << "  Name\tType\tDeclared\n";
+  std::cout << "  Name\tType\tDeclared\tInitialized\n";
   for (const auto& n : names) {
     const auto& s = syms.at(n);
-    std::cout << "  " << s.name << "\t" << s.type << "\t" << (s.declared ? "yes" : "no") << "\n";
+    std::cout << "  " << s.name << "\t" << s.type << "\t" << (s.declared ? "yes" : "no") << "\t\t"
+              << (s.initialized ? "yes" : "no") << "\n";
   }
 }
 
@@ -90,8 +91,8 @@ static void RunCompilerPipeline(bool lexOnly = false) {
 
   if (lexOnly) return;
 
-  // 2) Syntax
-  std::cout << "\n========== 2) Syntax Analysis (Parse Tree) ==========\n";
+  // 2) Syntax (AST shape only — types are filled in the next phase)
+  std::cout << "\n========== 2) Syntax Analysis (AST / concrete syntax tree) ==========\n";
   compiler::Parser parser(toks);
   auto ast = parser.ParseProgram();
   if (!parser.Errors().empty()) {
@@ -100,7 +101,7 @@ static void RunCompilerPipeline(bool lexOnly = false) {
   compiler::PrintTree(ast.get());
 
   // 3) Semantic
-  std::cout << "\n========== 3) Semantic Analysis (Annotated Tree) ==========\n";
+  std::cout << "\n========== 3) Semantic Analysis (annotated AST) ==========\n";
   compiler::SemanticAnalyzer sem;
   auto semRes = sem.Analyze(ast.get(), lex.SymbolTable());
   if (!semRes.errors.empty()) {

@@ -20,7 +20,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.className} min-h-screen flex flex-col`}>
+      {/* suppressHydrationWarning: next-themes + browser extensions (e.g. cz-shortcut-listen on body) */}
+      <body
+        className={`${inter.className} min-h-screen flex flex-col`}
+        suppressHydrationWarning
+      >
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"

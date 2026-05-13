@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Editor from "@monaco-editor/react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
+import { isAxiosError } from "axios";
 import { Play, Loader2, RefreshCw, LayoutTemplate, TerminalSquare, FastForward } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -19,11 +20,63 @@ c = a + b * (10 - 4);
 print(c);
 `;
 
+interface AstJsonNode {
+  kind: string;
+  lexeme?: string;
+  tokenType?: string;
+  line?: number;
+  col?: number;
+  layer?: string;
+  type?: string;
+  typeOk?: boolean;
+  scopeDepth?: number;
+  symbolKnownInitialized?: boolean;
+  isConst?: boolean;
+  constValue?: number | null;
+  children?: AstJsonNode[];
+}
+
+interface TokenRow {
+  type: string;
+  lexeme: string;
+  line: number;
+  col: number;
+}
+
+interface SymbolRow {
+  name: string;
+  type: string;
+  declared: boolean;
+  initialized?: boolean;
+}
+
+interface IrInstrRow {
+  op: string;
+  res: string;
+  arg1: string;
+  arg2: string;
+}
+
+interface PipelineResponseBody {
+  tokens?: TokenRow[];
+  symbolTable?: SymbolRow[];
+  literalTable?: number[];
+  parseTree?: AstJsonNode | null;
+  annotatedAst?: AstJsonNode | null;
+  parseErrors?: string[];
+  semanticErrors?: string[];
+  ir?: IrInstrRow[];
+  optimizedIr?: IrInstrRow[];
+  targetCode?: string[];
+  detail?: string;
+  error?: string;
+}
+
 export default function PlaygroundPage() {
   const { theme } = useTheme();
   const [code, setCode] = useState(DEFAULT_CODE);
   const [isRunning, setIsRunning] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<PipelineResponseBody | null>(null);
   const [activeTab, setActiveTab] = useState("tokens");
 
   const handleRun = async () => {
@@ -31,34 +84,81 @@ export default function PlaygroundPage() {
     setResult(null);
     try {
       const response = await api.post("/compiler/pipeline", { source_code: code });
-      setResult(response.data);
+      setResult(response.data as PipelineResponseBody);
       toast.success("Compilation successful");
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Compilation failed");
-      setResult(error.response?.data || { error: "Unknown error" });
-      if (error.response?.data?.parseErrors?.length || error.response?.data?.semanticErrors?.length) {
-         setResult(error.response.data);
-         if (error.response.data.semanticErrors?.length) setActiveTab("semantic");
-         else setActiveTab("syntax");
+    } catch (error: unknown) {
+      if (isAxiosError(error)) {
+        const data = error.response?.data as PipelineResponseBody | { detail?: string } | undefined;
+        const detail =
+          data && typeof data === "object" && "detail" in data && typeof data.detail === "string"
+            ? data.detail
+            : "Compilation failed";
+        toast.error(detail);
+        const body =
+          data && typeof data === "object"
+            ? (data as PipelineResponseBody)
+            : ({ error: "Unknown error" } satisfies PipelineResponseBody);
+        setResult(body);
+        if (body.parseErrors?.length || body.semanticErrors?.length) {
+          if (body.semanticErrors?.length) setActiveTab("semantic");
+          else setActiveTab("syntax");
+        }
+      } else {
+        toast.error("Compilation failed");
+        setResult({ error: "Unknown error" });
       }
     } finally {
       setIsRunning(false);
     }
   };
 
-  // Helper to render tree (recursive)
-  const renderTree = (node: any, depth = 0): React.ReactNode => {
-    if (!node) return <></>;
+  const renderTree = (
+    node: AstJsonNode,
+    depth = 0,
+    prefix = "",
+    isLast = true,
+    childIndex = 0
+  ): ReactNode => {
+    if (!node) return null;
+    const branch = depth === 0 ? "" : isLast ? "└─ " : "├─ ";
+    const nextPrefix = depth === 0 ? "" : prefix + (isLast ? "   " : "│  ");
+    const key = `${node.kind}-${node.line ?? 0}-${node.col ?? 0}-${depth}-${childIndex}`;
+    const isSemantic = node.layer === "semantic";
     return (
-      <div key={Math.random()} style={{ paddingLeft: `${depth * 20}px` }} className="py-1">
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground">{depth === 0 ? "root" : "├─"}</span>
+      <div key={key} className="py-0.5 font-mono text-sm leading-relaxed">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <span className="text-muted-foreground whitespace-pre select-none">
+            {prefix}
+            {branch}
+          </span>
           <span className="font-semibold text-primary">{node.kind}</span>
-          {node.lexeme && <span className="bg-muted px-1.5 py-0.5 rounded text-xs">[{node.lexeme}]</span>}
-          {node.type && <span className="text-xs text-muted-foreground">:{node.type}</span>}
-          {node.isConst && <span className="text-xs text-green-500">(const={node.constValue})</span>}
+          {node.lexeme ? (
+            <span className="bg-muted px-1.5 py-0.5 rounded text-xs">[{node.lexeme}]</span>
+          ) : null}
+          {node.type ? (
+            <span className="text-xs text-violet-400">:{node.type}</span>
+          ) : null}
+          {isSemantic && node.typeOk === false ? (
+            <span className="text-xs text-destructive">type error</span>
+          ) : null}
+          {isSemantic && typeof node.scopeDepth === "number" ? (
+            <span className="text-xs text-sky-500/90">scope={node.scopeDepth}</span>
+          ) : null}
+          {isSemantic && node.kind === "Ident" && typeof node.symbolKnownInitialized === "boolean" ? (
+            <span className={node.symbolKnownInitialized ? "text-xs text-emerald-500" : "text-xs text-amber-500"}>
+              {node.symbolKnownInitialized ? "init✓" : "uninit"}
+            </span>
+          ) : null}
+          {node.isConst && node.constValue != null ? (
+            <span className="text-xs text-green-500">const={node.constValue}</span>
+          ) : null}
+          {node.layer === "syntax" ? (
+            <span className="text-xs text-muted-foreground/80">syntax</span>
+          ) : null}
         </div>
-        {node.children?.map((child: any) => renderTree(child, depth + 1))}
+        {(node.children ?? []).map((child, i) =>
+          renderTree(child, depth + 1, nextPrefix, i === (node.children?.length ?? 0) - 1, i)
+        )}
       </div>
     );
   };
@@ -124,8 +224,8 @@ export default function PlaygroundPage() {
               <div className="border-b px-2 overflow-x-auto custom-scrollbar">
                 <TabsList className="h-12 bg-transparent justify-start w-max">
                   <TabsTrigger value="tokens" className="data-[state=active]:bg-muted/50 data-[state=active]:shadow-none rounded-none border-b-2 border-transparent data-[state=active]:border-primary transition-all">Tokens</TabsTrigger>
-                  <TabsTrigger value="syntax" className="data-[state=active]:bg-muted/50 data-[state=active]:shadow-none rounded-none border-b-2 border-transparent data-[state=active]:border-primary transition-all">Parse Tree</TabsTrigger>
-                  <TabsTrigger value="semantic" className="data-[state=active]:bg-muted/50 data-[state=active]:shadow-none rounded-none border-b-2 border-transparent data-[state=active]:border-primary transition-all">Semantic</TabsTrigger>
+                  <TabsTrigger value="syntax" className="data-[state=active]:bg-muted/50 data-[state=active]:shadow-none rounded-none border-b-2 border-transparent data-[state=active]:border-primary transition-all">Syntax (AST)</TabsTrigger>
+                  <TabsTrigger value="semantic" className="data-[state=active]:bg-muted/50 data-[state=active]:shadow-none rounded-none border-b-2 border-transparent data-[state=active]:border-primary transition-all">Semantic AST</TabsTrigger>
                   <TabsTrigger value="ir" className="data-[state=active]:bg-muted/50 data-[state=active]:shadow-none rounded-none border-b-2 border-transparent data-[state=active]:border-primary transition-all">IR Code</TabsTrigger>
                   <TabsTrigger value="target" className="data-[state=active]:bg-muted/50 data-[state=active]:shadow-none rounded-none border-b-2 border-transparent data-[state=active]:border-primary transition-all">Target Code</TabsTrigger>
                 </TabsList>
@@ -141,22 +241,23 @@ export default function PlaygroundPage() {
                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
                                <h3 className="font-bold mb-3 border-b pb-2">Tokens</h3>
-                               {result.tokens?.map((t: any, i: number) => (
+                               {result.tokens?.map((t, i) => (
                                  <div key={i} className="flex justify-between py-1 border-b border-border/50 hover:bg-muted/50 px-2 rounded">
                                    <span className="text-primary">{t.type}</span>
-                                   <span className="text-muted-foreground">"{t.lexeme}"</span>
+                                   <span className="text-muted-foreground">{`"${t.lexeme}"`}</span>
                                  </div>
                                ))}
                             </div>
                             <div className="space-y-6">
                                <div>
                                   <h3 className="font-bold mb-3 border-b pb-2">Symbol Table</h3>
-                                  {result.symbolTable?.map((s: any, i: number) => (
+                                  {result.symbolTable?.map((s, i) => (
                                     <div key={i} className="flex justify-between py-1 border-b border-border/50 hover:bg-muted/50 px-2 rounded">
                                       <span className="font-semibold">{s.name}</span>
-                                      <div className="flex gap-2">
+                                      <div className="flex flex-wrap gap-2 justify-end text-xs">
                                         <span className="text-blue-400">{s.type}</span>
                                         <span className={s.declared ? "text-green-500" : "text-red-500"}>{s.declared ? "declared" : "undeclared"}</span>
+                                        <span className={s.initialized ? "text-emerald-500" : "text-amber-600"}>{s.initialized ? "initialized" : "not init"}</span>
                                       </div>
                                     </div>
                                   ))}
@@ -164,7 +265,7 @@ export default function PlaygroundPage() {
                                <div>
                                   <h3 className="font-bold mb-3 border-b pb-2">Literal Table</h3>
                                   <div className="flex flex-wrap gap-2">
-                                    {result.literalTable?.map((l: any, i: number) => (
+                                    {result.literalTable?.map((l, i) => (
                                       <span key={i} className="bg-orange-500/10 text-orange-500 px-2 py-1 rounded">
                                         [{i}] {l}
                                       </span>
@@ -175,9 +276,9 @@ export default function PlaygroundPage() {
                          </div>
                       </TabsContent>
 
-                      {/* Parse Tree Tab */}
+                      {/* Syntax / AST (pre-semantic snapshot from engine) */}
                       <TabsContent value="syntax" className="m-0 focus-visible:outline-none">
-                         {result.parseErrors?.length > 0 ? (
+                         {Array.isArray(result.parseErrors) && result.parseErrors.length > 0 ? (
                             <div className="bg-destructive/10 text-destructive p-4 rounded-lg mb-4 border border-destructive/20">
                               <h3 className="font-bold mb-2">Syntax Errors:</h3>
                               <ul className="list-disc pl-5">
@@ -185,16 +286,20 @@ export default function PlaygroundPage() {
                               </ul>
                             </div>
                          ) : null}
+                         <p className="text-xs text-muted-foreground mb-3">
+                           Abstract syntax tree from the parser. Nodes are tagged <code className="text-[11px]">layer: syntax</code>
+                           — structure and token metadata only (no types or symbol checks yet). Expressions are nested under statements.
+                         </p>
                          {result.parseTree && (
-                           <div className="bg-card p-4 rounded-lg border">
+                           <div className="bg-card p-4 rounded-lg border overflow-x-auto">
                              {renderTree(result.parseTree)}
                            </div>
                          )}
                       </TabsContent>
 
-                      {/* Semantic Tab */}
+                      {/* Semantic / annotated AST */}
                       <TabsContent value="semantic" className="m-0 focus-visible:outline-none">
-                         {result.semanticErrors?.length > 0 ? (
+                         {Array.isArray(result.semanticErrors) && result.semanticErrors.length > 0 ? (
                             <div className="bg-destructive/10 text-destructive p-4 rounded-lg mb-4 border border-destructive/20">
                               <h3 className="font-bold mb-2">Semantic Errors:</h3>
                               <ul className="list-disc pl-5">
@@ -206,12 +311,22 @@ export default function PlaygroundPage() {
                                Semantic analysis passed successfully. No errors found.
                             </div>
                          )}
-                         {result.parseTree && (
-                           <div className="bg-card p-4 rounded-lg border mt-4">
+                         <p className="text-xs text-muted-foreground mb-3">
+                           Same tree shape as syntax, after semantic analysis. Nodes use <code className="text-[11px]">layer: semantic</code>
+                           with inferred types, <span className="text-sky-500/90">scope depth</span>, identifier{" "}
+                           <span className="text-emerald-500">init✓</span>/<span className="text-amber-500">uninit</span> state, and constant folding where possible.
+                           Compare with the <strong>Syntax (AST)</strong> tab — the structure matches; annotations differ.
+                         </p>
+                         {(() => {
+                           const tree = result.annotatedAst ?? result.parseTree;
+                           if (!tree) return null;
+                           return (
+                           <div className="bg-card p-4 rounded-lg border overflow-x-auto">
                              <h3 className="font-bold mb-3 border-b pb-2 text-muted-foreground">Annotated AST</h3>
-                             {renderTree(result.parseTree)}
+                             {renderTree(tree)}
                            </div>
-                         )}
+                           );
+                         })()}
                       </TabsContent>
 
                       {/* IR Tab */}
@@ -220,7 +335,7 @@ export default function PlaygroundPage() {
                             <div>
                                <h3 className="font-bold mb-3 border-b pb-2 text-muted-foreground">Original TAC</h3>
                                <div className="bg-card p-4 rounded-lg border">
-                                  {result.ir?.map((ir: any, i: number) => (
+                                  {result.ir?.map((ir, i) => (
                                      <div key={i} className="py-1 text-muted-foreground hover:text-foreground transition-colors">
                                         <span className="w-6 inline-block text-right mr-4 opacity-50">{i}:</span>
                                         {ir.op === 'PRINT' ? (
@@ -240,7 +355,7 @@ export default function PlaygroundPage() {
                                   <div className="absolute top-0 right-0 p-2 opacity-10">
                                      <FastForward className="w-16 h-16 text-green-500" />
                                   </div>
-                                  {result.optimizedIr?.map((ir: any, i: number) => (
+                                  {result.optimizedIr?.map((ir, i) => (
                                      <div key={i} className="py-1 hover:text-foreground transition-colors relative z-10">
                                         <span className="w-6 inline-block text-right mr-4 opacity-50 text-green-500/50">{i}:</span>
                                         {ir.op === 'PRINT' ? (
@@ -285,7 +400,9 @@ export default function PlaygroundPage() {
                  <Play className="w-8 h-8 opacity-20" />
                </div>
                <h3 className="text-lg font-semibold mb-2 text-foreground">Awaiting Execution</h3>
-               <p className="max-w-sm">Write your code in the editor and click "Run Pipeline" to see the compiler phases in action.</p>
+               <p className="max-w-sm">
+                 Write your code in the editor and click &quot;Run Pipeline&quot; to see the compiler phases in action.
+               </p>
              </div>
            )}
         </Card>

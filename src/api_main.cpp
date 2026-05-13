@@ -70,7 +70,9 @@ static std::string ReadFile(const std::string& path) {
 
 // ── AST to JSON ──────────────────────────────────────────────────────
 
-static std::string ASTToJSON(const compiler::ASTNode* n) {
+enum class ASTJsonMode { SyntaxStructure, SemanticAnnotated };
+
+static std::string ASTToJSON(const compiler::ASTNode* n, ASTJsonMode mode) {
   if (!n) return "null";
   std::ostringstream o;
   o << "{";
@@ -80,15 +82,28 @@ static std::string ASTToJSON(const compiler::ASTNode* n) {
   o << ",\"tokenType\":\"" << compiler::ToString(n->token.type) << "\"";
   o << ",\"line\":" << n->token.pos.line;
   o << ",\"col\":" << n->token.pos.col;
-  if (!n->type.name.empty())
-    o << ",\"type\":\"" << Esc(n->type.name) << "\"";
-  if (n->isConst && n->constValue)
-    o << ",\"constValue\":" << *n->constValue;
+  if (mode == ASTJsonMode::SyntaxStructure) {
+    o << ",\"layer\":\"syntax\"";
+  } else {
+    o << ",\"layer\":\"semantic\"";
+    if (!n->type.name.empty()) {
+      o << ",\"type\":\"" << Esc(n->type.name) << "\"";
+      o << ",\"typeOk\":" << (n->type.isValid ? "true" : "false");
+    }
+    if (n->isConst && n->constValue) {
+      o << ",\"isConst\":true";
+      o << ",\"constValue\":" << *n->constValue;
+    }
+    o << ",\"scopeDepth\":" << n->scopeDepth;
+    if (n->kind == compiler::NodeKind::Ident && !n->token.lexeme.empty()) {
+      o << ",\"symbolKnownInitialized\":" << (n->symbolKnownInitialized ? "true" : "false");
+    }
+  }
   if (!n->children.empty()) {
     o << ",\"children\":[";
     for (size_t i = 0; i < n->children.size(); ++i) {
       if (i) o << ",";
-      o << ASTToJSON(n->children[i].get());
+      o << ASTToJSON(n->children[i].get(), mode);
     }
     o << "]";
   }
@@ -130,7 +145,8 @@ static std::string SymbolTableToJSON(
     const auto& s = syms.at(names[i]);
     o << "{\"name\":\"" << Esc(s.name) << "\""
       << ",\"type\":\"" << Esc(s.type) << "\""
-      << ",\"declared\":" << (s.declared ? "true" : "false") << "}";
+      << ",\"declared\":" << (s.declared ? "true" : "false")
+      << ",\"initialized\":" << (s.initialized ? "true" : "false") << "}";
   }
   o << "]";
   return o.str();
@@ -318,8 +334,8 @@ static void CmdSyntax(const std::string& src) {
   std::cout << "{\"tokens\":" << TokensToJSON(toks)
             << ",\"symbolTable\":" << SymbolTableToJSON(lex.SymbolTable())
             << ",\"literalTable\":" << LiteralTableToJSON(lex.LiteralTable())
-            << ",\"parseTree\":" << ASTToJSON(ast.get())
-            << ",\"errors\":" << ErrorsToJSON(parser.Errors())
+            << ",\"parseTree\":" << ASTToJSON(ast.get(), ASTJsonMode::SyntaxStructure)
+            << ",\"parseErrors\":" << ErrorsToJSON(parser.Errors())
             << "}" << std::endl;
 }
 
@@ -328,12 +344,14 @@ static void CmdSemantic(const std::string& src) {
   auto toks = lex.Tokenize();
   compiler::Parser parser(toks);
   auto ast = parser.ParseProgram();
+  std::string syntaxTree = ASTToJSON(ast.get(), ASTJsonMode::SyntaxStructure);
   compiler::SemanticAnalyzer sem;
   auto res = sem.Analyze(ast.get(), lex.SymbolTable());
   std::cout << "{\"tokens\":" << TokensToJSON(toks)
             << ",\"symbolTable\":" << SymbolTableToJSON(res.symbols)
             << ",\"literalTable\":" << LiteralTableToJSON(lex.LiteralTable())
-            << ",\"parseTree\":" << ASTToJSON(ast.get())
+            << ",\"parseTree\":" << syntaxTree
+            << ",\"annotatedAst\":" << ASTToJSON(ast.get(), ASTJsonMode::SemanticAnnotated)
             << ",\"parseErrors\":" << ErrorsToJSON(parser.Errors())
             << ",\"semanticErrors\":" << ErrorsToJSON(res.errors)
             << "}" << std::endl;
@@ -344,6 +362,7 @@ static void CmdIntermediate(const std::string& src) {
   auto toks = lex.Tokenize();
   compiler::Parser parser(toks);
   auto ast = parser.ParseProgram();
+  std::string syntaxTree = ASTToJSON(ast.get(), ASTJsonMode::SyntaxStructure);
   compiler::SemanticAnalyzer sem;
   auto res = sem.Analyze(ast.get(), lex.SymbolTable());
   compiler::IRGen irg;
@@ -351,7 +370,8 @@ static void CmdIntermediate(const std::string& src) {
   std::cout << "{\"tokens\":" << TokensToJSON(toks)
             << ",\"symbolTable\":" << SymbolTableToJSON(res.symbols)
             << ",\"literalTable\":" << LiteralTableToJSON(lex.LiteralTable())
-            << ",\"parseTree\":" << ASTToJSON(ast.get())
+            << ",\"parseTree\":" << syntaxTree
+            << ",\"annotatedAst\":" << ASTToJSON(ast.get(), ASTJsonMode::SemanticAnnotated)
             << ",\"parseErrors\":" << ErrorsToJSON(parser.Errors())
             << ",\"semanticErrors\":" << ErrorsToJSON(res.errors)
             << ",\"ir\":" << IRToJSON(ir)
@@ -363,6 +383,7 @@ static void CmdOptimize(const std::string& src) {
   auto toks = lex.Tokenize();
   compiler::Parser parser(toks);
   auto ast = parser.ParseProgram();
+  std::string syntaxTree = ASTToJSON(ast.get(), ASTJsonMode::SyntaxStructure);
   compiler::SemanticAnalyzer sem;
   auto res = sem.Analyze(ast.get(), lex.SymbolTable());
   compiler::IRGen irg;
@@ -373,7 +394,8 @@ static void CmdOptimize(const std::string& src) {
   std::cout << "{\"tokens\":" << TokensToJSON(toks)
             << ",\"symbolTable\":" << SymbolTableToJSON(res.symbols)
             << ",\"literalTable\":" << LiteralTableToJSON(lex.LiteralTable())
-            << ",\"parseTree\":" << ASTToJSON(ast.get())
+            << ",\"parseTree\":" << syntaxTree
+            << ",\"annotatedAst\":" << ASTToJSON(ast.get(), ASTJsonMode::SemanticAnnotated)
             << ",\"parseErrors\":" << ErrorsToJSON(parser.Errors())
             << ",\"semanticErrors\":" << ErrorsToJSON(res.errors)
             << ",\"ir\":" << IRToJSON(ir)
@@ -386,6 +408,7 @@ static void CmdCodegen(const std::string& src) {
   auto toks = lex.Tokenize();
   compiler::Parser parser(toks);
   auto ast = parser.ParseProgram();
+  std::string syntaxTree = ASTToJSON(ast.get(), ASTJsonMode::SyntaxStructure);
   compiler::SemanticAnalyzer sem;
   auto res = sem.Analyze(ast.get(), lex.SymbolTable());
   compiler::IRGen irg;
@@ -397,7 +420,8 @@ static void CmdCodegen(const std::string& src) {
   std::cout << "{\"tokens\":" << TokensToJSON(toks)
             << ",\"symbolTable\":" << SymbolTableToJSON(res.symbols)
             << ",\"literalTable\":" << LiteralTableToJSON(lex.LiteralTable())
-            << ",\"parseTree\":" << ASTToJSON(ast.get())
+            << ",\"parseTree\":" << syntaxTree
+            << ",\"annotatedAst\":" << ASTToJSON(ast.get(), ASTJsonMode::SemanticAnnotated)
             << ",\"parseErrors\":" << ErrorsToJSON(parser.Errors())
             << ",\"semanticErrors\":" << ErrorsToJSON(res.errors)
             << ",\"ir\":" << IRToJSON(ir)

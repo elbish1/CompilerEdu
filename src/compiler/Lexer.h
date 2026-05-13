@@ -8,6 +8,7 @@ struct SymbolInfo {
   std::string name;
   std::string type;  // "int"
   bool declared = false;
+  bool initialized = false;  // set true after explicit init or assignment
 };
 
 class Lexer {

@@ -109,7 +109,7 @@ export default function Home() {
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-bold mb-4">Everything you need to learn</h2>
             <p className="text-muted-foreground max-w-2xl mx-auto">
-              We've transformed the classic compiler design pipeline into a beautiful, interactive web experience.
+              We&apos;ve transformed the classic compiler design pipeline into a beautiful, interactive web experience.
             </p>
           </div>
 
@@ -192,7 +192,7 @@ export default function Home() {
                   <div className="text-blue-400">print</div><span className="text-foreground">(a</span> <span className="text-primary">+</span> <span className="text-foreground">b);</span>
                   
                   <div className="mt-8 pt-6 border-t border-dashed opacity-70">
-                    <div className="text-green-400 mb-2">// Intermediate Code (IR)</div>
+                    <div className="text-green-400 mb-2">{"// Intermediate Code (IR)"}</div>
                     <div>MOV a = 2</div>
                     <div>MOV b = 3</div>
                     <div>ADD t1 = a b</div>

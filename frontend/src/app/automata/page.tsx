@@ -5,27 +5,80 @@ import { Network, Play, RefreshCw, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import api from "@/lib/api";
 import { toast } from "sonner";
-import { ReactFlow, Controls, Background, useNodesState, useEdgesState, MarkerType, Panel, Node, Edge } from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
-import Dagre from '@dagrejs/dagre';
+import { isAxiosError } from "axios";
+import {
+  ReactFlow,
+  Controls,
+  Background,
+  useNodesState,
+  useEdgesState,
+  MarkerType,
+  Panel,
+  Node,
+  Edge,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import Dagre from "@dagrejs/dagre";
+
+interface AutomatonTransition {
+  from: number;
+  to: number;
+  symbol: string;
+}
+
+interface AutomatonGraph {
+  start: number;
+  stateCount: number;
+  accept: number[];
+  transitions: AutomatonTransition[];
+}
+
+interface DfaGraph extends AutomatonGraph {
+  subsets?: Record<string, number[]>;
+}
+
+interface GrammarProduction {
+  lhs: string;
+  rhs: string;
+}
+
+interface Grammar {
+  startSymbol: string;
+  productions: GrammarProduction[];
+}
+
+interface DerivationsResponse {
+  nfa: AutomatonGraph;
+  dfa: DfaGraph;
+  grammar?: Grammar;
+  leftmostDerivation?: string[];
+  rightmostDerivation?: string[];
+}
+
+interface EdgeAgg {
+  source: string;
+  target: string;
+  symbols: string[];
+  isEpsilon: boolean;
+}
 
 export default function AutomataPage() {
   const [regex, setRegex] = useState("(a|b)*abb");
   const [testString, setTestString] = useState("ababb");
   const [isRunning, setIsRunning] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<DerivationsResponse | null>(null);
   const [activeTab, setActiveTab] = useState("nfa");
 
   // React Flow state
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
-  const generateLayout = (nodesData: any[], edgesData: any[]) => {
+  const generateLayout = (nodesData: Node[], edgesData: Edge[]) => {
     const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
     g.setGraph({ rankdir: 'LR', nodesep: 50, ranksep: 100, marginx: 50, marginy: 50 });
 
@@ -48,7 +101,7 @@ export default function AutomataPage() {
     });
   };
 
-  const processAutomata = (automata: any, isDFA = false) => {
+  const processAutomata = (automata: AutomatonGraph) => {
     if (!automata) return;
 
     const initialNodes = Array.from({ length: automata.stateCount }, (_, i) => {
@@ -68,16 +121,17 @@ export default function AutomataPage() {
       };
     });
 
-    const edgeMap = new Map();
+    const edgeMap = new Map<string, EdgeAgg>();
 
-    automata.transitions.forEach((t: any) => {
+    automata.transitions.forEach((t) => {
       const source = `${t.from}`;
       const target = `${t.to}`;
       const key = `${source}-${target}`;
       const sym = t.symbol === "ε" ? "ε" : t.symbol;
 
-      if (edgeMap.has(key)) {
-        edgeMap.get(key).symbols.push(sym);
+      const existing = edgeMap.get(key);
+      if (existing) {
+        existing.symbols.push(sym);
       } else {
         edgeMap.set(key, { source, target, symbols: [sym], isEpsilon: sym === "ε" });
       }
@@ -99,7 +153,7 @@ export default function AutomataPage() {
       };
     });
 
-    const layoutedNodes = generateLayout(initialNodes, initialEdges);
+    const layoutedNodes = generateLayout(initialNodes as Node[], initialEdges as Edge[]);
     setNodes(layoutedNodes);
     setEdges(initialEdges);
   };
@@ -109,12 +163,19 @@ export default function AutomataPage() {
     setResult(null);
     try {
       const response = await api.post("/automata/derivations", { regex, test_string: testString });
-      setResult(response.data);
-      processAutomata(response.data.nfa);
+      const data = response.data as DerivationsResponse;
+      setResult(data);
+      processAutomata(data.nfa);
       setActiveTab("nfa");
       toast.success("Automata generated");
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Failed to generate automata");
+    } catch (error: unknown) {
+      const msg =
+        isAxiosError(error) &&
+        error.response?.data &&
+        typeof (error.response.data as { detail?: string }).detail === "string"
+          ? (error.response.data as { detail: string }).detail
+          : "Failed to generate automata";
+      toast.error(msg);
     } finally {
       setIsRunning(false);
     }
@@ -123,8 +184,8 @@ export default function AutomataPage() {
   const switchGraph = (tab: string) => {
     setActiveTab(tab);
     if (!result) return;
-    if (tab === "nfa" && result.nfa) processAutomata(result.nfa, false);
-    if (tab === "dfa" && result.dfa) processAutomata(result.dfa, true);
+    if (tab === "nfa" && result.nfa) processAutomata(result.nfa);
+    if (tab === "dfa" && result.dfa) processAutomata(result.dfa);
   };
 
   return (
@@ -214,7 +275,7 @@ export default function AutomataPage() {
                    <div className="bg-card border rounded-lg p-3 font-mono text-sm">
                       <div className="text-primary mb-2">Start: {result.grammar?.startSymbol}</div>
                       <div className="max-h-[200px] overflow-y-auto custom-scrollbar pr-2">
-                        {result.grammar?.productions?.map((p: any, i: number) => (
+                        {result.grammar?.productions?.map((p, i) => (
                            <div key={i} className="flex gap-2 py-0.5">
                              <span className="text-foreground w-6 text-right">{p.lhs}</span>
                              <span className="text-muted-foreground">→</span>
@@ -229,7 +290,7 @@ export default function AutomataPage() {
                    <div className="p-4 border-b">
                       <h4 className="text-xs font-bold uppercase text-muted-foreground mb-3">DFA Subsets (NFA States)</h4>
                       <div className="bg-card border rounded-lg p-3 font-mono text-xs flex flex-col gap-1 max-h-[150px] overflow-y-auto custom-scrollbar">
-                         {Object.entries(result.dfa.subsets).map(([dfaState, nfaStates]: any) => (
+                         {(Object.entries(result.dfa.subsets) as [string, number[]][]).map(([dfaState, nfaStates]) => (
                             <div key={dfaState} className="flex gap-2">
                                <span className="text-primary w-4">{dfaState}</span>
                                <span className="text-muted-foreground">=</span>
@@ -241,13 +302,15 @@ export default function AutomataPage() {
                 )}
 
                 <div className="p-4">
-                   <h4 className="text-xs font-bold uppercase text-muted-foreground mb-3">Derivations for "{testString}"</h4>
+                   <h4 className="text-xs font-bold uppercase text-muted-foreground mb-3">
+                     Derivations for {`"${testString}"`}
+                   </h4>
                    
                    <div className="mb-4">
                       <div className="text-sm font-semibold mb-2">Leftmost Derivation</div>
-                      {result.leftmostDerivation?.length > 0 ? (
-                         <div className="bg-card border rounded-lg p-3 font-mono text-sm max-h-[150px] overflow-y-auto custom-scrollbar flex flex-col gap-1">
-                            {result.leftmostDerivation.map((step: string, i: number) => (
+                      {Array.isArray(result.leftmostDerivation) && result.leftmostDerivation.length > 0 ? (
+                          <div className="bg-card border rounded-lg p-3 font-mono text-sm max-h-[150px] overflow-y-auto custom-scrollbar flex flex-col gap-1">
+                            {result.leftmostDerivation.map((step, i) => (
                                <div key={i}>
                                   {i > 0 && <span className="text-muted-foreground mr-2 opacity-50 text-xs">⇒</span>}
                                   {step}
@@ -263,9 +326,9 @@ export default function AutomataPage() {
 
                    <div>
                       <div className="text-sm font-semibold mb-2">Rightmost Derivation</div>
-                      {result.rightmostDerivation?.length > 0 ? (
-                         <div className="bg-card border rounded-lg p-3 font-mono text-sm max-h-[150px] overflow-y-auto custom-scrollbar flex flex-col gap-1">
-                            {result.rightmostDerivation.map((step: string, i: number) => (
+                      {Array.isArray(result.rightmostDerivation) && result.rightmostDerivation.length > 0 ? (
+                          <div className="bg-card border rounded-lg p-3 font-mono text-sm max-h-[150px] overflow-y-auto custom-scrollbar flex flex-col gap-1">
+                            {result.rightmostDerivation.map((step, i) => (
                                <div key={i}>
                                   {i > 0 && <span className="text-muted-foreground mr-2 opacity-50 text-xs">⇒</span>}
                                   {step}

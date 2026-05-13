@@ -24,6 +24,7 @@ class SymbolModel(BaseModel):
     name: str
     type: str
     declared: bool
+    initialized: bool = False
 
 
 class IRInstrModel(BaseModel):
@@ -45,7 +46,7 @@ class SyntaxResponse(BaseModel):
     symbolTable: list[SymbolModel]
     literalTable: list[int]
     parseTree: dict
-    errors: list[str]
+    parseErrors: list[str]
 
 
 class SemanticResponse(BaseModel):
@@ -53,6 +54,7 @@ class SemanticResponse(BaseModel):
     symbolTable: list[SymbolModel]
     literalTable: list[int]
     parseTree: dict
+    annotatedAst: dict
     parseErrors: list[str]
     semanticErrors: list[str]
 
@@ -62,6 +64,7 @@ class IntermediateResponse(BaseModel):
     symbolTable: list[SymbolModel]
     literalTable: list[int]
     parseTree: dict
+    annotatedAst: dict
     parseErrors: list[str]
     semanticErrors: list[str]
     ir: list[IRInstrModel]
@@ -72,6 +75,7 @@ class OptimizeResponse(BaseModel):
     symbolTable: list[SymbolModel]
     literalTable: list[int]
     parseTree: dict
+    annotatedAst: dict
     parseErrors: list[str]
     semanticErrors: list[str]
     ir: list[IRInstrModel]
@@ -83,6 +87,7 @@ class PipelineResponse(BaseModel):
     symbolTable: list[SymbolModel]
     literalTable: list[int]
     parseTree: dict
+    annotatedAst: dict
     parseErrors: list[str]
     semanticErrors: list[str]
     ir: list[IRInstrModel]

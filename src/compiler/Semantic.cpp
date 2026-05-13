@@ -11,7 +11,7 @@ void SemanticAnalyzer::Error(const Token& t, const std::string& msg) {
 SemanticResult SemanticAnalyzer::Analyze(ASTNode* root, const std::unordered_map<std::string, SymbolInfo>& lexSymbols) {
   symbols_ = lexSymbols;  // identifiers seen by lexer
   errors_.clear();
-  Visit(root);
+  Visit(root, 0);
 
   SemanticResult r;
   r.errors = errors_;
@@ -19,46 +19,51 @@ SemanticResult SemanticAnalyzer::Analyze(ASTNode* root, const std::unordered_map
   return r;
 }
 
-void SemanticAnalyzer::Visit(ASTNode* n) {
+void SemanticAnalyzer::Visit(ASTNode* n, int depth) {
   if (!n) return;
+  n->scopeDepth = depth;
   switch (n->kind) {
     case NodeKind::Program:
-      for (auto& ch : n->children) Visit(ch.get());
+      for (auto& ch : n->children) Visit(ch.get(), depth + 1);
       break;
     case NodeKind::Decl:
     case NodeKind::Assign:
     case NodeKind::Print:
-      VisitStmt(n);
+      VisitStmt(n, depth);
       break;
     case NodeKind::BinaryOp:
     case NodeKind::Ident:
     case NodeKind::Number:
-      VisitExpr(n);
+      VisitExpr(n, depth);
       break;
   }
 }
 
-void SemanticAnalyzer::VisitStmt(ASTNode* n) {
+void SemanticAnalyzer::VisitStmt(ASTNode* n, int depth) {
   if (!n) return;
+  n->scopeDepth = depth;
   if (n->kind == NodeKind::Decl) {
     const std::string& name = n->token.lexeme;
     auto it = symbols_.find(name);
     if (it == symbols_.end()) {
-      symbols_.insert({name, SymbolInfo{name, "int", true}});
+      symbols_.insert({name, SymbolInfo{name, "int", true, false}});
     } else {
       if (it->second.declared) {
         Error(n->token, "Redeclaration of variable '" + name + "'");
       }
       it->second.declared = true;
       it->second.type = "int";
+      it->second.initialized = false;
     }
 
     n->type = {"int", true};
     if (!n->children.empty()) {
-      VisitExpr(n->children[0].get());
+      VisitExpr(n->children[0].get(), depth + 1);
       if (n->children[0]->type.name != "int") {
         Error(n->token, "Type mismatch in initialization of '" + name + "'");
         n->type.isValid = false;
+      } else {
+        symbols_[name].initialized = true;
       }
     }
     return;
@@ -69,26 +74,29 @@ void SemanticAnalyzer::VisitStmt(ASTNode* n) {
     auto it = symbols_.find(name);
     if (it == symbols_.end() || !it->second.declared) {
       Error(n->token, "Assignment to undeclared variable '" + name + "'");
-      symbols_[name] = SymbolInfo{name, "int", false};
+      symbols_[name] = SymbolInfo{name, "int", false, false};
     }
 
-    VisitExpr(n->children[0].get());
+    VisitExpr(n->children[0].get(), depth + 1);
     if (n->children[0]->type.name != "int") {
       Error(n->token, "Type mismatch in assignment to '" + name + "'");
     }
     n->type = {"int", true};
+    auto it2 = symbols_.find(name);
+    if (it2 != symbols_.end()) it2->second.initialized = true;
     return;
   }
 
   if (n->kind == NodeKind::Print) {
-    VisitExpr(n->children[0].get());
+    VisitExpr(n->children[0].get(), depth + 1);
     n->type = {"int", true};
     return;
   }
 }
 
-void SemanticAnalyzer::VisitExpr(ASTNode* n) {
+void SemanticAnalyzer::VisitExpr(ASTNode* n, int depth) {
   if (!n) return;
+  n->scopeDepth = depth;
   if (n->kind == NodeKind::Number) {
     n->type = {"int", true};
     n->isConst = true;
@@ -104,18 +112,24 @@ void SemanticAnalyzer::VisitExpr(ASTNode* n) {
     auto it = symbols_.find(name);
     if (it == symbols_.end() || !it->second.declared) {
       Error(n->token, "Use of undeclared variable '" + name + "'");
-      symbols_[name] = SymbolInfo{name, "int", false};
+      symbols_[name] = SymbolInfo{name, "int", false, false};
       n->type = {"int", false};
+      n->symbolKnownInitialized = false;
     } else {
       n->type = {it->second.type, true};
+      if (!it->second.initialized) {
+        Error(n->token, "Use of uninitialized variable '" + name + "'");
+        n->type.isValid = false;
+      }
+      n->symbolKnownInitialized = it->second.initialized;
     }
     n->isConst = false;
     n->constValue = edu::Nullopt;
     return;
   }
   if (n->kind == NodeKind::BinaryOp) {
-    VisitExpr(n->children[0].get());
-    VisitExpr(n->children[1].get());
+    VisitExpr(n->children[0].get(), depth + 1);
+    VisitExpr(n->children[1].get(), depth + 1);
     n->type = {"int", n->children[0]->type.isValid && n->children[1]->type.isValid};
 
     // Constant propagation for the annotated tree

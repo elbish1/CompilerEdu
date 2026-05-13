@@ -16,9 +16,9 @@ class SemanticAnalyzer {
 
  private:
   void Error(const Token& t, const std::string& msg);
-  void Visit(ASTNode* n);
-  void VisitStmt(ASTNode* n);
-  void VisitExpr(ASTNode* n);
+  void Visit(ASTNode* n, int depth);
+  void VisitStmt(ASTNode* n, int depth);
+  void VisitExpr(ASTNode* n, int depth);
 
   std::unordered_map<std::string, SymbolInfo> symbols_;
   std::vector<std::string> errors_;
